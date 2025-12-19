@@ -1,0 +1,78 @@
+import pathlib
+import platform
+
+# 1. KHẮC PHỤC LỖI POSIXPATH (Quan trọng nhất khi chạy trên Windows)
+if platform.system() == 'Windows':
+    pathlib.PosixPath = pathlib.WindowsPath
+
+import streamlit as st
+import torch
+import cv2
+import numpy as np
+from PIL import Image
+import tempfile
+import os
+
+# --- CẤU HÌNH ---
+st.set_page_config(page_title="AI Nhận Diện", page_icon="⛑️")
+
+st.title("⛑️ Hệ thống Phát hiện Mũ bảo hiểm")
+st.write(f"Đang chạy trên thư mục: `{os.getcwd()}`") # In ra thư mục hiện tại để kiểm tra
+
+# --- CÀI ĐẶT ---
+confidence = st.sidebar.slider("Độ tin cậy", 0.0, 1.0, 0.45, 0.05)
+model_path = "best.pt" 
+
+# --- KIỂM TRA FILE TỒN TẠI KHÔNG ---
+if not os.path.exists(model_path):
+    st.error(f"❌ LỖI: Không tìm thấy file '{model_path}' trong thư mục này!")
+    st.warning("👉 Bạn hãy copy file best.pt vào cùng thư mục với file app.py")
+    st.stop() # Dừng chương trình ngay nếu không có file
+
+# --- LOAD MODEL ---
+@st.cache_resource
+def load_model():
+    try:
+        # Load custom model
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_path, force_reload=True)
+        return model
+    except Exception as e:
+        st.error("❌ Lỗi khi tải Model!")
+        st.code(f"Chi tiết lỗi: {e}") # Hiện lỗi cụ thể để dễ sửa
+        return None
+
+with st.spinner("Đang tải model..."):
+    model = load_model()
+
+if model is None:
+    st.error("⚠️ Không thể khởi động ứng dụng do lỗi Model.")
+    st.stop()
+
+# --- GIAO DIỆN CHÍNH ---
+st.success("✅ Model đã tải thành công!")
+model.conf = confidence
+
+# ... (Phần xử lý video/ảnh) ...
+tab1, tab2 = st.tabs(["🖼️ Ảnh", "🎥 Video"])
+
+with tab2:
+    uploaded_video = st.file_uploader("Chọn video...", type=['mp4', 'avi'])
+    if uploaded_video is not None:
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(uploaded_video.read())
+        
+        if st.button("▶️ Chạy Video"):
+            cap = cv2.VideoCapture(tfile.name)
+            stframe = st.empty()
+            
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret: break
+                
+                # --- CHỖ NÀY LÀ CHỖ BẠN BỊ LỖI TRƯỚC ĐÓ ---
+                # Vì mình đã check 'if model is None' ở trên rồi nên ở đây sẽ an toàn
+                results = model(frame) 
+                
+                result_frame = np.squeeze(results.render())
+                stframe.image(result_frame, channels="BGR", use_container_width=True)
+            cap.release()
